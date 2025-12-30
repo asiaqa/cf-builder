@@ -1,87 +1,67 @@
-# .github/workflows/go-build.yml
+# ------------------------------------------------------------
+# Build static cloudflared binaries for Linux/386, amd64,
+# arm64, mips and mipsle, then publish them as a GitHub release.
 #
-# Build static Go binaries for a matrix of platforms and publish them as a
-# GitHub release.  The static linking works on Alpine Linux (musl) because
-# CGO is disabled and the Go toolchain is told to link the C runtime statically.
-#
-# References:
-#   • https://golang.org/wiki/Modules#releasing-modules
-#   • https://github.com/wangyoucao577/go-release-action#readme
-#   • https://github.com/actions/setup-go#installing-go
-
+# The key change: a single ldflags value that includes
+#   -w -s               (size optimisation)
+#   -extldflags=-static (force static linking)
+# ------------------------------------------------------------
 name: Go‑build
 
 on:
-  workflow_dispatch:               # manual trigger
+  workflow_dispatch:      # manual trigger
   release:
-    types: [created]               # run on tag creation, for example
+    types: [created]      # fire when a tag/release is created
 
 jobs:
   releases-matrix:
     name: Release Go Binary
     runs-on: ubuntu-latest
 
-    # ------------------------------------------------------------------
-    # 1️⃣ Matrix – the OS/arch combos we want to build.
-    # ------------------------------------------------------------------
     strategy:
       matrix:
-        goos:   [linux]                     # only Linux for Alpine use‑case
+        goos:   [linux]                # only Linux (Alpine)
         goarch: [386, amd64, arm64, mips, mipsle]
 
-    # ------------------------------------------------------------------
-    # 2️⃣ Global env for the whole job – disables cgo and forces static
-    #     linking.  We also set GOFLAGS so that every `go build` gets the
-    #     correct ldflags automatically (the release‑action also receives
-    #     them, but having them here makes the job easier to debug locally).
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------
+    # Environment – disable cgo, no extra GOFLAGS needed.
+    # --------------------------------------------------------
     env:
-      CGO_ENABLED: 0                       # ❌ no cgo → pure‑Go static binary
-      GOFLAGS: "-ldflags=-extldflags=-static"   # static C runtime
+      CGO_ENABLED: 0                  # pure‑Go → static binary
       GO111MODULE: on
 
     steps:
-      # ---------------------------------------------------------------
-      # 0️⃣ Checkout the repository (the action already does a shallow
-      #     fetch, but we keep the explicit clone that you had before).
-      # ---------------------------------------------------------------
+      # ----------------------------------------------------
+      # 0️⃣ Checkout the repo (the original workflow also
+      #    re‑cloned the upstream project – we keep that.
+      # ----------------------------------------------------
       - uses: actions/checkout@v3
 
-      # ---------------------------------------------------------------
-      # 1️⃣ (Optional) Clean the workspace and re‑clone the upstream repo.
-      #     You originally removed *everything* and then `git clone`
-      #     Cloudflare’s repo.  This is preserved – it works fine.
-      # ---------------------------------------------------------------
-      - name: Refresh source tree
+      - name: Refresh source tree (clone upstream)
         run: |
-          # Remove *everything* (including hidden files) – be careful!
           rm -rf ./{,.[!.],..?}*
           git clone https://github.com/cloudflare/cloudflared .
 
-      # ---------------------------------------------------------------
-      # 2️⃣ Install the Go toolchain (the release‑action will also install
-      #     a version based on `go.mod`, but explicit installation makes
-      #     the job self‑contained and gives us a chance to pin a version
-      #     if you want.
-      # ---------------------------------------------------------------
+      # ----------------------------------------------------
+      # 1️⃣ Install Go (latest stable; pin if you prefer)
+      # ----------------------------------------------------
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          # Using the latest stable; adjust if you need a specific version.
-          go-version: 'stable'
+          go-version: 'stable'   # or a concrete version, e.g. 1.22.5
           cache: true
 
-      # ---------------------------------------------------------------
-      # 3️⃣ Install UPX (optional – used for binary compression).
-      # ---------------------------------------------------------------
+      # ----------------------------------------------------
+      # 2️⃣ Ensure UPX is present for optional compression
+      # ----------------------------------------------------
       - name: Install UPX
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y upx
 
-      # ---------------------------------------------------------------
-      # 4️⃣ Build & publish the static binary.
-      # ---------------------------------------------------------------
+      # ----------------------------------------------------
+      # 3️⃣ Build & publish the static binary
+      # ----------------------------------------------------
       - name: Build & Release
         uses: wangyoucao577/go-release-action@v1
         with:
@@ -89,30 +69,18 @@ jobs:
 
           goos:           ${{ matrix.goos }}
           goarch:         ${{ matrix.goarch }}
-          goamd64:        v1                # only relevant for amd64
+          goamd64:        v1            # only relevant for amd64
 
-          # Path inside the repo where the `main` package lives.
           project_path:   "./cmd/cloudflared"
-
-          # Desired binary name (without .exe on Windows – the action adds it if needed)
           binary_name:    "cloudflared"
 
-          # Overwrite any existing asset with the same name.
-          overwrite:      true
+          # Force static linking + strip debug symbols in ONE ldflags string
+          ldflags:        "-w -s -extldflags=-static"
 
-          # Release/tag settings – you had `latest`; keep it.
+          # Keep the original options you liked
+          build_flags:    "-a -trimpath"
+          executable_compression: "upx --ultra-brute"
+          overwrite:      true
           release_tag:    latest
           release_name:   "Release"
           asset_name:     "cloudflared-latest-${{ matrix.goos }}-${{ matrix.goarch }}"
-
-          # Build flags:
-          #   -a            → force rebuilding of packages
-          #   -ldflags ...  → strip debug info & force static linking (handled by GOFLAGS)
-          #   -trimpath     → remove absolute file system paths from the binary (optional, makes reproducible builds)
-          build_flags:    "-a -trimpath"
-
-          # Linker flags (kept for strip, but static linking already set via GOFLAGS)
-          ldflags:        "-w -s"
-
-          # Optional compression with UPX (kept from your original config)
-          executable_compression: "upx --ultra-brute"
