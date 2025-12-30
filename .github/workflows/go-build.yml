@@ -1,0 +1,42 @@
+name: Go-build
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  releases-matrix:
+    name: Release Go Binary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: ["386", amd64, arm64, mips, mipsle]
+
+    env:
+      CGO_ENABLED: 0          # static build
+      GOFLAGS: -trimpath      # optional reproducibility
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Clone Cloudflare repo
+        run: |
+          git clone https://github.com/cloudflare/cloudflared .
+
+      - uses: wangyoucao577/go-release-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          goamd64: v1
+          release_tag: latest
+          project_path: "./cmd/cloudflared"
+          binary_name: "cloudflared"
+          build_flags: "-a -trimpath"
+          ldflags: "-s -w -linkmode external -extldflags '-static'"
+          executable_compression: "upx --ultra-brute"
+          overwrite: true
+          release_name: "Release"
+          asset_name: cloudflared-latest-${{ matrix.goos }}-${{ matrix.goarch }}
