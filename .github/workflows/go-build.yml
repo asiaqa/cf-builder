@@ -15,43 +15,29 @@ jobs:
         goarch: ["386", amd64, arm64, mips, mipsle]
 
     env:
-      CGO_ENABLED: 0          # static binary
-      GOFLAGS: -trimpath      # optional, makes builds reproducible
+      CGO_ENABLED: 0          # static build
+      GOFLAGS: -trimpath      # optional reproducibility
 
     steps:
-      # -------------------------------------------------
-      # Checkout the **cloudflare/cloudflared** source
-      # into the folder `src` (instead of cloning manually)
-      # -------------------------------------------------
-      - name: Checkout Cloudflare repo
-        uses: actions/checkout@v3
-        with:
-          repository: cloudflare/cloudflared
-          ref: main                 # or the tag/branch you need
-          path: src                 # clone into ./src
+      - uses: actions/checkout@v3
 
-      # -------------------------------------------------
-      # Build & publish a fully‑static binary
-      # -------------------------------------------------
-      - name: Build & release static binary
-        uses: wangyoucao577/go-release-action@v1
+      - name: Clone Cloudflare repo
+        run: |
+          rm -rf ./{,.[!.],..?}*
+          git clone https://github.com/cloudflare/cloudflared .
+
+      - uses: wangyoucao577/go-release-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           goamd64: v1
-
           release_tag: latest
-          release_name: "Release"
-
-          project_path: "./src/cmd/cloudflared"
-          binary_name:  "cloudflared"
-
+          project_path: "./cmd/cloudflared"
+          binary_name: "cloudflared"
           build_flags: "-a -trimpath"
           ldflags: "-s -w -linkmode external -extldflags '-static'"
-
           executable_compression: "upx --ultra-brute"
           overwrite: true
-
-          asset_name: "cloudflared-latest-${{ matrix.goos }}-${{ matrix.goarch }}"
+          release_name: "Release"
+          asset_name: cloudflared-latest-${{ matrix.goos }}-${{ matrix.goarch }}
